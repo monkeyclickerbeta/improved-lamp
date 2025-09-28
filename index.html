@@ -1,0 +1,430 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>DOSBox Web Runner</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Courier New', monospace;
+            background: linear-gradient(135deg, #1a1a2e, #16213e);
+            color: #00ff00;
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .header {
+            text-align: center;
+            padding: 20px;
+            background: rgba(0, 0, 0, 0.3);
+            border-bottom: 2px solid #00ff00;
+        }
+
+        .header h1 {
+            font-size: 2.5em;
+            text-shadow: 0 0 10px #00ff00;
+            margin-bottom: 10px;
+        }
+
+        .header p {
+            opacity: 0.8;
+            font-size: 1.1em;
+        }
+
+        .container {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            padding: 20px;
+            gap: 20px;
+        }
+
+        .dosbox-container {
+            width: 100%;
+            max-width: 800px;
+            background: rgba(0, 0, 0, 0.5);
+            border: 2px solid #00ff00;
+            border-radius: 10px;
+            overflow: hidden;
+            box-shadow: 0 0 20px rgba(0, 255, 0, 0.3);
+        }
+
+        .dosbox-header {
+            background: rgba(0, 255, 0, 0.1);
+            padding: 10px 20px;
+            border-bottom: 1px solid #00ff00;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .dosbox-title {
+            font-weight: bold;
+        }
+
+        .dosbox-controls {
+            display: flex;
+            gap: 10px;
+        }
+
+        .control-btn {
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            border: 1px solid #00ff00;
+            cursor: pointer;
+        }
+
+        .control-btn.close { background: #ff4444; }
+        .control-btn.minimize { background: #ffaa00; }
+        .control-btn.maximize { background: #00ff00; }
+
+        #dosbox-canvas {
+            width: 100%;
+            height: 500px;
+            background: #000;
+            display: block;
+            border: none;
+        }
+
+        .controls {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
+            justify-content: center;
+            align-items: center;
+        }
+
+        .btn {
+            background: linear-gradient(145deg, #0a4a0a, #064406);
+            border: 2px solid #00ff00;
+            color: #00ff00;
+            padding: 10px 20px;
+            font-family: inherit;
+            font-size: 14px;
+            cursor: pointer;
+            border-radius: 5px;
+            transition: all 0.3s ease;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+
+        .btn:hover {
+            background: linear-gradient(145deg, #00ff00, #00cc00);
+            color: #000;
+            box-shadow: 0 0 15px rgba(0, 255, 0, 0.5);
+        }
+
+        .btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        .file-input {
+            display: none;
+        }
+
+        .file-label {
+            background: linear-gradient(145deg, #4a0a4a, #440644);
+            border: 2px solid #ff00ff;
+            color: #ff00ff;
+            padding: 10px 20px;
+            cursor: pointer;
+            border-radius: 5px;
+            transition: all 0.3s ease;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+
+        .file-label:hover {
+            background: linear-gradient(145deg, #ff00ff, #cc00cc);
+            color: #000;
+            box-shadow: 0 0 15px rgba(255, 0, 255, 0.5);
+        }
+
+        .status {
+            background: rgba(0, 0, 0, 0.7);
+            padding: 15px;
+            border-radius: 5px;
+            border-left: 4px solid #00ff00;
+            max-width: 800px;
+            width: 100%;
+        }
+
+        .status.error {
+            border-left-color: #ff4444;
+            color: #ff8888;
+        }
+
+        .info-panel {
+            background: rgba(0, 0, 0, 0.3);
+            padding: 20px;
+            border-radius: 10px;
+            border: 1px solid rgba(0, 255, 0, 0.3);
+            max-width: 800px;
+            width: 100%;
+            margin-top: 20px;
+        }
+
+        .info-panel h3 {
+            color: #00ffff;
+            margin-bottom: 15px;
+            text-align: center;
+        }
+
+        .info-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 15px;
+        }
+
+        .info-item {
+            padding: 10px;
+            background: rgba(0, 0, 0, 0.5);
+            border-radius: 5px;
+            border-left: 3px solid #00ff00;
+        }
+
+        .info-item strong {
+            color: #00ffff;
+        }
+
+        @media (max-width: 768px) {
+            .header h1 {
+                font-size: 2em;
+            }
+            
+            .controls {
+                flex-direction: column;
+                align-items: stretch;
+            }
+            
+            .btn, .file-label {
+                text-align: center;
+            }
+            
+            #dosbox-canvas {
+                height: 300px;
+            }
+        }
+
+        .loading {
+            text-align: center;
+            padding: 40px;
+        }
+
+        .spinner {
+            border: 3px solid rgba(0, 255, 0, 0.3);
+            border-top: 3px solid #00ff00;
+            border-radius: 50%;
+            width: 40px;
+            height: 40px;
+            animation: spin 1s linear infinite;
+            margin: 0 auto 20px;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>🖥️ DOSBox Web Runner</h1>
+        <p>Experience classic DOS games and applications in your browser</p>
+    </div>
+
+    <div class="container">
+        <div class="dosbox-container">
+            <div class="dosbox-header">
+                <div class="dosbox-title">DOSBox Emulator</div>
+                <div class="dosbox-controls">
+                    <div class="control-btn minimize"></div>
+                    <div class="control-btn maximize"></div>
+                    <div class="control-btn close"></div>
+                </div>
+            </div>
+            <canvas id="dosbox-canvas"></canvas>
+        </div>
+
+        <div class="controls">
+            <button class="btn" id="start-btn" onclick="startDOSBox()">Start DOSBox</button>
+            <button class="btn" id="stop-btn" onclick="stopDOSBox()" disabled>Stop DOSBox</button>
+            <label for="file-input" class="file-label">Load DOS Program (.exe/.com/.zip)</label>
+            <input type="file" id="file-input" class="file-input" accept=".exe,.com,.zip,.bat" onchange="loadFile(event)">
+            <button class="btn" onclick="sendCommand('dir')">List Files (DIR)</button>
+            <button class="btn" onclick="sendCommand('cls')">Clear Screen (CLS)</button>
+        </div>
+
+        <div class="status" id="status">
+            Ready to start DOSBox. Click "Start DOSBox" to begin.
+        </div>
+
+        <div class="info-panel">
+            <h3>Usage Instructions</h3>
+            <div class="info-grid">
+                <div class="info-item">
+                    <strong>Getting Started:</strong><br>
+                    Click "Start DOSBox" to initialize the emulator. This will boot into a DOS environment where you can run commands.
+                </div>
+                <div class="info-item">
+                    <strong>Loading Programs:</strong><br>
+                    Use the "Load DOS Program" button to upload .exe, .com, .zip, or .bat files to run in DOSBox.
+                </div>
+                <div class="info-item">
+                    <strong>Basic Commands:</strong><br>
+                    • DIR - List files<br>
+                    • CLS - Clear screen<br>
+                    • CD - Change directory<br>
+                    • TYPE filename - View file contents
+                </div>
+                <div class="info-item">
+                    <strong>Controls:</strong><br>
+                    Use your keyboard normally. Most DOS programs will work as expected. Press Alt+Enter for fullscreen (if supported).
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/js-dos/6.22.59/js-dos.min.js"></script>
+    <script>
+        let dosboxInstance = null;
+        let isRunning = false;
+
+        function updateStatus(message, isError = false) {
+            const statusEl = document.getElementById('status');
+            statusEl.textContent = message;
+            statusEl.className = isError ? 'status error' : 'status';
+        }
+
+        function updateButtons() {
+            document.getElementById('start-btn').disabled = isRunning;
+            document.getElementById('stop-btn').disabled = !isRunning;
+        }
+
+        async function startDOSBox() {
+            if (isRunning) return;
+
+            try {
+                updateStatus('Loading DOSBox...');
+                
+                const canvas = document.getElementById('dosbox-canvas');
+                
+                // Initialize js-dos
+                const dos = Dos(canvas, {
+                    wdosboxUrl: "https://cdnjs.cloudflare.com/ajax/libs/js-dos/6.22.59/wdosbox.wasm.js",
+                });
+
+                // Start DOS
+                dosboxInstance = await dos.ready;
+                
+                // Run a basic DOS session
+                await dosboxInstance.main([
+                    "-c", "mount c .",
+                    "-c", "c:",
+                    "-c", "echo Welcome to DOSBox Web!",
+                    "-c", "echo Type 'dir' to list files or load a program using the upload button.",
+                    "-c", "echo ==============================================="
+                ]);
+
+                isRunning = true;
+                updateStatus('DOSBox is running! You can now type DOS commands or load programs.');
+                updateButtons();
+
+            } catch (error) {
+                console.error('Error starting DOSBox:', error);
+                updateStatus('Error starting DOSBox: ' + error.message, true);
+                isRunning = false;
+                updateButtons();
+            }
+        }
+
+        function stopDOSBox() {
+            if (dosboxInstance) {
+                dosboxInstance.exit();
+                dosboxInstance = null;
+            }
+            isRunning = false;
+            updateStatus('DOSBox stopped.');
+            updateButtons();
+            
+            // Clear canvas
+            const canvas = document.getElementById('dosbox-canvas');
+            const ctx = canvas.getContext('2d');
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+        }
+
+        function sendCommand(command) {
+            if (!isRunning || !dosboxInstance) {
+                updateStatus('DOSBox is not running. Please start it first.', true);
+                return;
+            }
+
+            try {
+                // Send command to DOS
+                dosboxInstance.shell(command);
+                updateStatus(`Command sent: ${command}`);
+            } catch (error) {
+                updateStatus('Error sending command: ' + error.message, true);
+            }
+        }
+
+        async function loadFile(event) {
+            if (!isRunning) {
+                updateStatus('Please start DOSBox first before loading files.', true);
+                return;
+            }
+
+            const file = event.target.files[0];
+            if (!file) return;
+
+            try {
+                updateStatus('Loading file: ' + file.name);
+
+                const arrayBuffer = await file.arrayBuffer();
+                const uint8Array = new Uint8Array(arrayBuffer);
+
+                // Create file in DOS filesystem
+                if (dosboxInstance && dosboxInstance.fs) {
+                    dosboxInstance.fs.writeFile(file.name, uint8Array);
+                    updateStatus(`File loaded: ${file.name}. Type "${file.name}" to run it (if it's an executable).`);
+                    
+                    // Auto-run if it's an executable
+                    if (file.name.toLowerCase().endsWith('.exe') || file.name.toLowerCase().endsWith('.com')) {
+                        setTimeout(() => {
+                            sendCommand(file.name);
+                        }, 1000);
+                    }
+                } else {
+                    updateStatus('Error: Could not access DOS filesystem.', true);
+                }
+
+            } catch (error) {
+                console.error('Error loading file:', error);
+                updateStatus('Error loading file: ' + error.message, true);
+            }
+
+            // Reset file input
+            event.target.value = '';
+        }
+
+        // Initialize
+        updateButtons();
+        updateStatus('Ready to start DOSBox. Click "Start DOSBox" to begin.');
+
+        // Handle canvas clicks to focus
+        document.getElementById('dosbox-canvas').addEventListener('click', function() {
+            this.focus();
+        });
+    </script>
+</body>
+</html>
