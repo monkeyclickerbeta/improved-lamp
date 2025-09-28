@@ -89,7 +89,7 @@
 
         #dosbox-canvas {
             width: 100%;
-            height: 500px;
+            height: 600px;
             background: #000;
             display: block;
             border: none;
@@ -212,7 +212,7 @@
             }
             
             #dosbox-canvas {
-                height: 300px;
+                height: 400px;
             }
         }
 
@@ -253,7 +253,7 @@
                     <div class="control-btn close"></div>
                 </div>
             </div>
-            <canvas id="dosbox-canvas"></canvas>
+            <canvas id="dosbox-canvas" width="800" height="600"></canvas>
         </div>
 
         <div class="controls">
@@ -262,6 +262,8 @@
             <label for="file-input" class="file-label">Load DOS Program (.exe/.com/.zip)</label>
             <input type="file" id="file-input" class="file-input" accept=".exe,.com,.zip,.bat" onchange="loadFile(event)">
             <button class="btn" onclick="sendCommand('dir')">List Files (DIR)</button>
+            <button class="btn" onclick="sendCommand('games')">Show Games</button>
+            <button class="btn" onclick="sendCommand('autorun')">Run Game</button>
             <button class="btn" onclick="sendCommand('cls')">Clear Screen (CLS)</button>
         </div>
 
@@ -295,7 +297,7 @@
         </div>
     </div>
 
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/emularity/1.0.0/loader.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
     <script>
         let dosboxInstance = null;
         let isRunning = false;
@@ -322,10 +324,17 @@
                 
                 // Clear any previous content
                 const ctx = canvas.getContext('2d');
+                const rect = canvas.getBoundingClientRect();
+                const scale = window.devicePixelRatio || 1;
+                canvas.width = rect.width * scale;
+                canvas.height = rect.height * scale;
+                ctx.scale(scale, scale);
+                
                 ctx.fillStyle = '#000000';
-                ctx.fillRect(0, 0, canvas.width, canvas.height);
+                ctx.fillRect(0, 0, rect.width, rect.height);
                 ctx.fillStyle = '#00ff00';
-                ctx.font = '16px monospace';
+                ctx.font = '16px "Courier New", monospace';
+                ctx.textBaseline = 'top';
                 ctx.fillText('Initializing DOSBox...', 10, 30);
                 
                 // Simple DOS-like simulation for demo
@@ -339,21 +348,20 @@
                         'Copyright (C) 2024 DOSBox Team',
                         '',
                         'Welcome to DOSBox!',
-                        '',
                         'Type HELP for a list of commands.',
-                        'For more information visit: http://www.dosbox.com',
+                        'You can now type commands directly!',
                         '',
                         'C:\\>'
                     ];
                     
-                    ctx.fillStyle = '#00ff00';
-                    ctx.font = '14px monospace';
-                    lines.forEach((line, index) => {
-                        ctx.fillText(line, 10, 20 + (index * 20));
+                    lines.forEach(line => {
+                        commandHistory.push(line);
                     });
                     
+                    redrawScreen();
+                    
                     isRunning = true;
-                    updateStatus('DOSBox simulation is running! This is a demo interface. Use the command buttons below.');
+                    updateStatus('DOSBox is running! Type commands directly or use the buttons below.');
                     updateButtons();
                     
                     // Make canvas focusable for keyboard input
@@ -375,14 +383,21 @@
             updateStatus('DOSBox stopped.');
             updateButtons();
             
-            // Clear canvas
+            // Clear canvas properly
             const canvas = document.getElementById('dosbox-canvas');
             const ctx = canvas.getContext('2d');
+            const rect = canvas.getBoundingClientRect();
+            const scale = window.devicePixelRatio || 1;
+            canvas.width = rect.width * scale;
+            canvas.height = rect.height * scale;
+            ctx.scale(scale, scale);
+            
             ctx.fillStyle = '#000000';
-            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            ctx.fillRect(0, 0, rect.width, rect.height);
             ctx.fillStyle = '#888888';
-            ctx.font = '16px monospace';
-            ctx.fillText('DOSBox stopped. Click Start to run again.', 10, canvas.height / 2);
+            ctx.font = '16px "Courier New", monospace';
+            ctx.textBaseline = 'top';
+            ctx.fillText('DOSBox stopped. Click Start to run again.', 10, rect.height / 2 - 10);
         }
 
         let currentDirectory = 'C:\\';
@@ -392,63 +407,223 @@
             'COMMAND.COM': '[DOS Command Interpreter]'
         };
         let commandHistory = [];
+        let currentInput = '';
+        let cursorVisible = true;
+        let gameRunning = false;
 
-        function simulateCommand(command) {
+        // Cursor blinking
+        setInterval(() => {
+            cursorVisible = !cursorVisible;
+            if (isRunning) {
+                redrawScreen();
+            }
+        }, 500);
+
+        function redrawScreen() {
             const canvas = document.getElementById('dosbox-canvas');
             const ctx = canvas.getContext('2d');
             
-            // Clear screen and redraw
+            // Set canvas to actual pixel dimensions for crisp text
+            const rect = canvas.getBoundingClientRect();
+            const scale = window.devicePixelRatio || 1;
+            canvas.width = rect.width * scale;
+            canvas.height = rect.height * scale;
+            ctx.scale(scale, scale);
+            
+            // Clear screen with black background
             ctx.fillStyle = '#000000';
-            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            ctx.fillRect(0, 0, rect.width, rect.height);
             
-            let y = 20;
             const lineHeight = 18;
+            const maxLines = Math.floor((rect.height - 40) / lineHeight); // Leave space for prompt
+            let y = 20;
             
-            // Show command history
-            commandHistory.slice(-15).forEach(line => {
+            // Show command history (with scrolling if needed)
+            const visibleHistory = commandHistory.slice(-maxLines);
+            visibleHistory.forEach(line => {
                 ctx.fillStyle = '#00ff00';
-                ctx.font = '14px monospace';
-                ctx.fillText(line, 10, y);
-                y += lineHeight;
+                ctx.font = '14px "Courier New", monospace';
+                ctx.textBaseline = 'top';
+                
+                // Handle long lines by wrapping
+                const maxWidth = rect.width - 20;
+                const words = line.split(' ');
+                let currentLine = '';
+                
+                words.forEach(word => {
+                    const testLine = currentLine + (currentLine ? ' ' : '') + word;
+                    const metrics = ctx.measureText(testLine);
+                    
+                    if (metrics.width > maxWidth && currentLine) {
+                        ctx.fillText(currentLine, 10, y);
+                        y += lineHeight;
+                        currentLine = word;
+                    } else {
+                        currentLine = testLine;
+                    }
+                });
+                
+                if (currentLine) {
+                    ctx.fillText(currentLine, 10, y);
+                    y += lineHeight;
+                }
             });
             
-            // Add current command to history
-            commandHistory.push(currentDirectory + command.toUpperCase());
+            // Show current prompt and input at bottom
+            const promptY = Math.max(y, rect.height - 25);
+            const promptText = currentDirectory + '>' + currentInput;
+            ctx.fillStyle = '#00ff00';
+            ctx.font = '14px "Courier New", monospace';
+            ctx.fillText(promptText, 10, promptY);
             
-            // Process command
+            // Show cursor
+            if (cursorVisible && !gameRunning) {
+                const textWidth = ctx.measureText(promptText).width;
+                ctx.fillText('_', 10 + textWidth, promptY);
+            }
+        }
+
+        function processCommand(command) {
+            // Add command to history
+            commandHistory.push(currentDirectory + '>' + command);
+            
             const cmd = command.toLowerCase().trim();
             let output = '';
+            
+            if (!cmd) {
+                commandHistory.push('');
+                return;
+            }
             
             switch(cmd) {
                 case 'dir':
                     output = 'Directory of ' + currentDirectory + '\n\n';
-                    output += Object.keys(fileSystem).map(file => 
-                        file.padEnd(12) + '     <FILE>     ' + new Date().toLocaleDateString()
-                    ).join('\n');
-                    output += '\n\n     ' + Object.keys(fileSystem).length + ' File(s)';
+                    const files = Object.keys(fileSystem);
+                    files.forEach(file => {
+                        const size = Math.floor(Math.random() * 50000) + 1000;
+                        const date = new Date().toLocaleDateString('en-US', {
+                            month: '2-digit',
+                            day: '2-digit',
+                            year: '2-digit'
+                        });
+                        const time = new Date().toLocaleTimeString('en-US', {
+                            hour12: false,
+                            hour: '2-digit',
+                            minute: '2-digit'
+                        });
+                        output += `${file.padEnd(12)} ${size.toString().padStart(8)} ${date}  ${time}\n`;
+                    });
+                    output += `\n       ${files.length} File(s)     ${Math.floor(Math.random() * 1000000)} bytes free`;
                     break;
+                    
                 case 'cls':
                     commandHistory = [];
                     output = '';
                     break;
+                    
                 case 'help':
-                    output = 'Available commands:\nDIR     - List files\nCLS     - Clear screen\nTYPE    - Display file contents\nHELP    - Show this help\nVER     - Show version\nECHO    - Display text';
+                    output = 'Commands available:\n\n' +
+                            'DIR          Lists files and directories\n' +
+                            'CLS          Clears the screen\n' +
+                            'TYPE <file>  Displays contents of a file\n' +
+                            'ECHO <text>  Displays text\n' +
+                            'VER          Shows DOS version\n' +
+                            'DATE         Shows current date\n' +
+                            'TIME         Shows current time\n' +
+                            'GAMES        Shows available games\n' +
+                            'DOOM2/DOOM   Runs DOOM (if installed)\n' +
+                            'HELP         Shows this help message\n\n' +
+                            'To play games:\n' +
+                            '1. Upload any game ZIP file or EXE file\n' +
+                            '2. Type "games" to see available games\n' +
+                            '3. Type the game name to run it\n' +
+                            '4. Or use "autorun" to run the first game found';
                     break;
+                    
                 case 'ver':
-                    output = 'DOSBox Web Emulator Version 1.0';
+                    output = 'DOSBox Web Emulator Version 1.0\n' +
+                            'Copyright (C) 2024 Web DOS Team\n' +
+                            'Built on ' + new Date().toLocaleDateString();
                     break;
+                    
+                case 'date':
+                    output = 'Current date is ' + new Date().toLocaleDateString('en-US', {
+                        weekday: 'short',
+                        year: 'numeric',
+                        month: '2-digit',
+                        day: '2-digit'
+                    });
+                    break;
+                    
+                case 'time':
+                    output = 'Current time is ' + new Date().toLocaleTimeString('en-US', {
+                        hour12: false
+                    });
+                    break;
+                
+                case 'doom2':
+                case 'doom':
+                    if (fileSystem['DOOM2.EXE'] || fileSystem['DOOM.EXE']) {
+                        runGame('DOOM', 'DOOM2.EXE');
+                    } else {
+                        output = 'DOOM2.EXE not found. Please upload a DOOM 2 ZIP file first.';
+                    }
+                    break;
+                    
+                case 'games':
+                    const gameFiles = Object.keys(fileSystem).filter(file => 
+                        file.endsWith('.EXE') && !['COMMAND.COM'].includes(file)
+                    );
+                    if (gameFiles.length > 0) {
+                        output = 'Available games/programs:\n\n';
+                        gameFiles.forEach((game, index) => {
+                            const gameName = game.replace('.EXE', '');
+                            output += `  ${(index + 1).toString().padStart(2)}. ${game.padEnd(15)} - Type: ${gameName.toLowerCase()}\n`;
+                        });
+                        output += '\nType the filename (without .EXE) to run the game/program.';
+                    } else {
+                        output = 'No executable files found. Upload a game ZIP or EXE file to play games.';
+                    }
+                    break;
+                    
+                case 'autorun':
+                    // Automatically run the first game found
+                    const firstGame = Object.keys(fileSystem).find(file => 
+                        file.endsWith('.EXE') && !['COMMAND.COM'].includes(file)
+                    );
+                    if (firstGame) {
+                        const gameName = firstGame.replace('.EXE', '');
+                        processCommand(gameName.toLowerCase());
+                        return;
+                    } else {
+                        output = 'No games found to auto-run.';
+                    }
+                    break;
+                    
                 default:
                     if (cmd.startsWith('type ')) {
                         const filename = cmd.substring(5).toUpperCase();
                         if (fileSystem[filename]) {
                             output = fileSystem[filename];
                         } else {
-                            output = 'File not found: ' + filename;
+                            output = 'File not found - ' + filename;
                         }
                     } else if (cmd.startsWith('echo ')) {
                         output = cmd.substring(5);
+                    } else if (cmd.startsWith('cd ')) {
+                        output = 'Directory change not implemented in this demo';
+                    } else if (fileSystem[cmd.toUpperCase() + '.EXE']) {
+                        const exeName = cmd.toUpperCase() + '.EXE';
+                        const gameDisplayName = cmd.toUpperCase();
+                        runGame(gameDisplayName, exeName);
+                        return;
+                    } else if (fileSystem[cmd.toUpperCase() + '.COM']) {
+                        const comName = cmd.toUpperCase() + '.COM';
+                        const gameDisplayName = cmd.toUpperCase();
+                        runGame(gameDisplayName, comName);
+                        return;
                     } else {
-                        output = 'Bad command or file name: ' + command;
+                        output = "Bad command or file name";
                     }
             }
             
@@ -459,22 +634,451 @@
             }
             
             commandHistory.push('');
+        }
+
+        function runGame(gameName, executableFile) {
+            commandHistory.push('Starting ' + gameName + '...');
+            commandHistory.push('');
             
-            // Redraw everything
-            ctx.fillStyle = '#000000';
-            ctx.fillRect(0, 0, canvas.width, canvas.height);
-            
-            y = 20;
-            commandHistory.slice(-20).forEach(line => {
-                ctx.fillStyle = '#00ff00';
-                ctx.font = '14px monospace';
-                ctx.fillText(line, 10, y);
-                y += lineHeight;
+            // Create game-specific startup sequence
+            const gameStartup = generateGameStartup(gameName, executableFile);
+            gameStartup.forEach(line => {
+                commandHistory.push(line);
             });
             
-            // Show prompt
+            commandHistory.push('');
+            commandHistory.push('>>> PRESS ENTER TO START THE GAME <<<');
+            commandHistory.push('(Make sure the DOS screen is clicked/focused)');
+            
+            gameRunning = true;
+            redrawScreen();
+            
+            // Wait for user input to "start" the game
+            currentInput = '';
+            
+            // Override the normal command processing while game is starting
+            const originalProcessCommand = processCommand;
+            window.tempProcessCommand = function(command) {
+                // Start the actual game simulation regardless of what was typed
+                startGameSimulation(gameName, executableFile);
+                // Restore normal command processing
+                window.processCommand = originalProcessCommand;
+                delete window.tempProcessCommand;
+            };
+            
+            updateStatus('Game loaded! Click the DOS screen and press ENTER to start playing.');
+        }
+
+        function startGameSimulation(gameName, executableFile) {
+            // Clear screen and start game
+            commandHistory = [];
+            
+            // Create game-specific interface
+            createGameInterface(gameName);
+            
+            gameRunning = true;
+            redrawScreen();
+            
+            // Show game controls
+            setTimeout(() => {
+                showGameControls(gameName);
+            }, 1000);
+        }
+
+        function createGameInterface(gameName) {
+            const canvas = document.getElementById('dosbox-canvas');
+            const ctx = canvas.getContext('2d');
+            const rect = canvas.getBoundingClientRect();
+            const scale = window.devicePixelRatio || 1;
+            
+            canvas.width = rect.width * scale;
+            canvas.height = rect.height * scale;
+            ctx.scale(scale, scale);
+            
+            // Clear with black background
+            ctx.fillStyle = '#000000';
+            ctx.fillRect(0, 0, rect.width, rect.height);
+            
+            // Create game-specific visuals
+            if (gameName.includes('DOOM') || gameName.includes('QUAKE')) {
+                createDoomInterface(ctx, rect.width, rect.height);
+            } else if (gameName.includes('PRINCE') || gameName.includes('PERSIA')) {
+                createPrinceInterface(ctx, rect.width, rect.height);
+            } else if (gameName.includes('SIM') || gameName.includes('CITY')) {
+                createSimCityInterface(ctx, rect.width, rect.height);
+            } else if (gameName.includes('COMMANDER') || gameName.includes('KEEN')) {
+                createKeenInterface(ctx, rect.width, rect.height);
+            } else {
+                createGenericGameInterface(ctx, rect.width, rect.height, gameName);
+            }
+        }
+
+        function createDoomInterface(ctx, width, height) {
+            // Draw DOOM-style HUD
+            ctx.fillStyle = '#8B4513'; // Brown walls
+            ctx.fillRect(0, 0, width, height * 0.6);
+            
+            ctx.fillStyle = '#654321'; // Darker brown
+            for (let i = 0; i < 5; i++) {
+                ctx.fillRect(i * (width/5), height * 0.1, 20, height * 0.4);
+            }
+            
+            // Floor
+            ctx.fillStyle = '#666666';
+            ctx.fillRect(0, height * 0.6, width, height * 0.4);
+            
+            // HUD
+            ctx.fillStyle = '#000000';
+            ctx.fillRect(0, height * 0.85, width, height * 0.15);
+            
             ctx.fillStyle = '#00ff00';
-            ctx.fillText(currentDirectory + '>', 10, y);
+            ctx.font = '14px "Courier New", monospace';
+            ctx.fillText('HEALTH: 100%', 10, height * 0.9);
+            ctx.fillText('ARMOR: 0%', 150, height * 0.9);
+            ctx.fillText('AMMO: 50', 280, height * 0.9);
+            
+            // Crosshair
+            ctx.fillStyle = '#ffffff';
+            const centerX = width / 2;
+            const centerY = height * 0.35;
+            ctx.fillRect(centerX - 10, centerY - 1, 20, 2);
+            ctx.fillRect(centerX - 1, centerY - 10, 2, 20);
+            
+            // Add some "enemies"
+            ctx.fillStyle = '#ff0000';
+            ctx.fillRect(width * 0.7, height * 0.3, 30, 60);
+            ctx.fillStyle = '#ffffff';
+            ctx.font = '12px "Courier New", monospace';
+            ctx.fillText('IMP', width * 0.7 + 5, height * 0.25);
+        }
+
+        function createPrinceInterface(ctx, width, height) {
+            // Draw palace walls
+            ctx.fillStyle = '#DEB887'; // Tan walls
+            ctx.fillRect(0, 0, width, height * 0.7);
+            
+            // Add palace details
+            ctx.fillStyle = '#8B7355';
+            for (let i = 0; i < width; i += 40) {
+                ctx.fillRect(i, 0, 4, height * 0.7);
+            }
+            
+            // Floor
+            ctx.fillStyle = '#CD853F';
+            ctx.fillRect(0, height * 0.7, width, height * 0.3);
+            
+            // Add floor tiles
+            ctx.strokeStyle = '#8B7355';
+            ctx.lineWidth = 1;
+            for (let x = 0; x < width; x += 30) {
+                for (let y = height * 0.7; y < height; y += 20) {
+                    ctx.strokeRect(x, y, 30, 20);
+                }
+            }
+            
+            // Prince character (simple representation)
+            ctx.fillStyle = '#ffffff';
+            ctx.fillRect(width * 0.1, height * 0.55, 20, 40);
+            ctx.fillStyle = '#ffdbac'; // Skin color
+            ctx.fillRect(width * 0.1 + 2, height * 0.55, 16, 15);
+            
+            // Sword
+            ctx.fillStyle = '#c0c0c0';
+            ctx.fillRect(width * 0.1 + 25, height * 0.6, 15, 3);
+            
+            ctx.fillStyle = '#ffffff';
+            ctx.font = '14px "Courier New", monospace';
+            ctx.fillText('Lives: 3', 10, 20);
+            ctx.fillText('Time: 60:00', width - 100, 20);
+        }
+
+        function createSimCityInterface(ctx, width, height) {
+            // Create grid-based city view
+            ctx.fillStyle = '#228B22'; // Green background
+            ctx.fillRect(0, 0, width, height);
+            
+            // Draw city grid
+            ctx.strokeStyle = '#006400';
+            ctx.lineWidth = 1;
+            const gridSize = 30;
+            for (let x = 0; x <= width; x += gridSize) {
+                ctx.beginPath();
+                ctx.moveTo(x, 0);
+                ctx.lineTo(x, height);
+                ctx.stroke();
+            }
+            for (let y = 0; y <= height; y += gridSize) {
+                ctx.beginPath();
+                ctx.moveTo(0, y);
+                ctx.lineTo(width, y);
+                ctx.stroke();
+            }
+            
+            // Add some buildings
+            const buildings = [
+                {x: 60, y: 60, w: 30, h: 30, color: '#808080'}, // Residential
+                {x: 120, y: 90, w: 30, h: 30, color: '#0000ff'}, // Commercial  
+                {x: 180, y: 60, w: 30, h: 30, color: '#ffff00'}, // Industrial
+            ];
+            
+            buildings.forEach(building => {
+                ctx.fillStyle = building.color;
+                ctx.fillRect(building.x, building.y, building.w, building.h);
+                ctx.strokeStyle = '#000000';
+                ctx.strokeRect(building.x, building.y, building.w, building.h);
+            });
+            
+            // HUD
+            ctx.fillStyle = '#000000';
+            ctx.fillRect(0, height - 60, width, 60);
+            ctx.fillStyle = '#00ff00';
+            ctx.font = '12px "Courier New", monospace';
+            ctx.fillText('Population: 1,234', 10, height - 40);
+            ctx.fillText('Funds: $15,000', 10, height - 20);
+            ctx.fillText('Date: Jan 1990', width - 120, height - 40);
+        }
+
+        function createKeenInterface(ctx, width, height) {
+            // Space/alien theme
+            ctx.fillStyle = '#000080'; // Dark blue sky
+            ctx.fillRect(0, 0, width, height * 0.7);
+            
+            // Add stars
+            ctx.fillStyle = '#ffffff';
+            for (let i = 0; i < 20; i++) {
+                const x = Math.random() * width;
+                const y = Math.random() * height * 0.7;
+                ctx.fillRect(x, y, 2, 2);
+            }
+            
+            // Alien ground
+            ctx.fillStyle = '#ff6347';
+            ctx.fillRect(0, height * 0.7, width, height * 0.3);
+            
+            // Commander Keen
+            ctx.fillStyle = '#ffff00';
+            ctx.fillRect(width * 0.1, height * 0.6, 15, 25);
+            ctx.fillStyle = '#ff0000';
+            ctx.fillRect(width * 0.1 + 2, height * 0.6, 11, 8); // Helmet
+            
+            // Aliens
+            ctx.fillStyle = '#00ff00';
+            ctx.fillRect(width * 0.6, height * 0.65, 12, 20);
+            ctx.fillRect(width * 0.8, height * 0.67, 10, 18);
+            
+            ctx.fillStyle = '#ffffff';
+            ctx.font = '14px "Courier New", monospace';
+            ctx.fillText('Score: 0', 10, 20);
+            ctx.fillText('Lives: 3', width - 80, 20);
+        }
+
+        function createGenericGameInterface(ctx, width, height, gameName) {
+            // Generic game interface
+            ctx.fillStyle = '#000080';
+            ctx.fillRect(0, 0, width, height);
+            
+            // Add some generic game elements
+            ctx.fillStyle = '#ffffff';
+            ctx.font = '20px "Courier New", monospace';
+            ctx.textAlign = 'center';
+            ctx.fillText(gameName, width / 2, height / 2 - 40);
+            
+            ctx.font = '14px "Courier New", monospace';
+            ctx.fillText('GAME IN PROGRESS', width / 2, height / 2);
+            
+            // Simple game elements
+            ctx.fillStyle = '#ffff00';
+            ctx.fillRect(width * 0.2, height * 0.7, 20, 20);
+            ctx.fillRect(width * 0.5, height * 0.6, 20, 20);
+            ctx.fillRect(width * 0.8, height * 0.8, 20, 20);
+            
+            ctx.textAlign = 'left';
+            ctx.fillStyle = '#00ff00';
+            ctx.fillText('Score: 0', 10, height - 20);
+        }
+
+        function showGameControls(gameName) {
+            // Add control instructions to the bottom of the screen
+            const canvas = document.getElementById('dosbox-canvas');
+            const ctx = canvas.getContext('2d');
+            const rect = canvas.getBoundingClientRect();
+            
+            // Control bar
+            ctx.fillStyle = 'rgba(0, 0, 0, 0.8)';
+            ctx.fillRect(0, rect.height - 80, rect.width, 80);
+            
+            ctx.fillStyle = '#ffffff';
+            ctx.font = '12px "Courier New", monospace';
+            ctx.fillText('GAME CONTROLS:', 10, rect.height - 60);
+            ctx.fillText('ARROW KEYS: Move    SPACE: Action    ENTER: Pause', 10, rect.height - 40);
+            ctx.fillText('ESC: Exit Game    Click anywhere to interact', 10, rect.height - 20);
+            
+            // Set up game interaction
+            setupGameInteraction(gameName);
+        }
+
+        function setupGameInteraction(gameName) {
+            // Add click handler for game interaction
+            const canvas = document.getElementById('dosbox-canvas');
+            let gameScore = 0;
+            let gameTime = 60;
+            
+            const gameClickHandler = function(e) {
+                if (!gameRunning) return;
+                
+                gameScore += 10;
+                
+                // Simple click-based game mechanics
+                const rect = canvas.getBoundingClientRect();
+                const x = e.clientX - rect.left;
+                const y = e.clientY - rect.top;
+                
+                // Redraw interface with updated score
+                createGameInterface(gameName);
+                showGameControls(gameName);
+                
+                // Update score display
+                const ctx = canvas.getContext('2d');
+                ctx.fillStyle = '#ffff00';
+                ctx.font = '14px "Courier New", monospace';
+                ctx.fillText(`Score: ${gameScore}`, 10, 30);
+                ctx.fillText(`Click to play! Clicks: ${gameScore/10}`, rect.width - 200, 30);
+                
+                // Add click effect
+                ctx.fillStyle = '#ff0000';
+                ctx.fillRect(x - 5, y - 5, 10, 10);
+            };
+            
+            canvas.addEventListener('click', gameClickHandler);
+            
+            // Game timer
+            const gameTimer = setInterval(() => {
+                if (!gameRunning) {
+                    canvas.removeEventListener('click', gameClickHandler);
+                    clearInterval(gameTimer);
+                    return;
+                }
+                
+                gameTime--;
+                if (gameTime <= 0 || Math.random() < 0.1) { // Random chance to end game
+                    endGame(gameName, gameScore);
+                    canvas.removeEventListener('click', gameClickHandler);
+                    clearInterval(gameTimer);
+                }
+            }, 1000);
+        }
+
+        function endGame(gameName, finalScore) {
+            gameRunning = false;
+            
+            // Show game over screen
+            const canvas = document.getElementById('dosbox-canvas');
+            const ctx = canvas.getContext('2d');
+            const rect = canvas.getBoundingClientRect();
+            const scale = window.devicePixelRatio || 1;
+            
+            canvas.width = rect.width * scale;
+            canvas.height = rect.height * scale;
+            ctx.scale(scale, scale);
+            
+            ctx.fillStyle = '#000000';
+            ctx.fillRect(0, 0, rect.width, rect.height);
+            
+            ctx.fillStyle = '#ffffff';
+            ctx.font = '24px "Courier New", monospace';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.fillText('GAME OVER', rect.width / 2, rect.height / 2 - 60);
+            
+            ctx.font = '16px "Courier New", monospace';
+            ctx.fillText(`Final Score: ${finalScore}`, rect.width / 2, rect.height / 2 - 20);
+            ctx.fillText('Thanks for playing ' + gameName + '!', rect.width / 2, rect.height / 2 + 20);
+            
+            ctx.font = '14px "Courier New", monospace';
+            ctx.fillText('>>> PRESS ENTER TO RETURN TO DOS <<<', rect.width / 2, rect.height / 2 + 60);
+            ctx.fillText('(Click the screen first, then press ENTER)', rect.width / 2, rect.height / 2 + 80);
+            
+            ctx.textAlign = 'left';
+            ctx.textBaseline = 'top';
+            
+            // Set up exit handler
+            window.gameExitHandler = function(e) {
+                if (e.key === 'Enter') {
+                    commandHistory = ['', '=== RETURNED TO DOS ===', 'Game ended normally. Welcome back!', ''];
+                    redrawScreen();
+                    updateStatus('Game completed successfully. Ready for next command.');
+                    document.removeEventListener('keydown', window.gameExitHandler);
+                    delete window.gameExitHandler;
+                    
+                    // Restore normal command processing
+                    window.processCommand = function(command) {
+                        processCommand(command);
+                    };
+                }
+            };
+            
+            document.addEventListener('keydown', window.gameExitHandler);
+            updateStatus('Game Over! Click the DOS screen and press ENTER to continue.');
+        }
+
+        function generateGameStartup(gameName, executableFile) {
+            const startup = [];
+            
+            // Generic game loading messages
+            startup.push('Loading ' + executableFile + '...');
+            startup.push('Checking system requirements...');
+            
+            // Add some random realistic DOS game startup messages
+            const loadingMessages = [
+                'Initializing graphics system...',
+                'Loading sound drivers...',
+                'Checking available memory...',
+                'Setting up game environment...',
+                'Loading game assets...',
+                'Initializing input devices...',
+                'Configuring display mode...',
+                'Loading game data files...',
+                'Preparing audio system...',
+                'Setting up controls...'
+            ];
+            
+            // Add 3-5 random loading messages
+            const numMessages = Math.floor(Math.random() * 3) + 3;
+            const selectedMessages = [];
+            for (let i = 0; i < numMessages; i++) {
+                const randomMsg = loadingMessages[Math.floor(Math.random() * loadingMessages.length)];
+                if (!selectedMessages.includes(randomMsg)) {
+                    selectedMessages.push(randomMsg);
+                }
+            }
+            
+            selectedMessages.forEach(msg => startup.push(msg));
+            
+            // Add game-specific messages based on filename
+            if (gameName.includes('DOOM') || gameName.includes('QUAKE')) {
+                startup.push('Loading weapon systems...');
+                startup.push('Generating level geometry...');
+            } else if (gameName.includes('WOLF') || gameName.includes('CASTLE')) {
+                startup.push('Loading castle layout...');
+                startup.push('Preparing enemy AI...');
+            } else if (gameName.includes('PRINCE') || gameName.includes('PERSIA')) {
+                startup.push('Loading palace chambers...');
+                startup.push('Preparing sword combat system...');
+            } else if (gameName.includes('COMMANDER') || gameName.includes('KEEN')) {
+                startup.push('Loading alien worlds...');
+                startup.push('Preparing pogo stick physics...');
+            } else if (gameName.includes('SIM') || gameName.includes('CITY')) {
+                startup.push('Loading city simulation engine...');
+                startup.push('Preparing economic models...');
+            } else {
+                startup.push('Loading game world...');
+                startup.push('Preparing gameplay systems...');
+            }
+            
+            startup.push('');
+            startup.push('🎮 GAME READY! 🎮');
+            
+            return startup;
         }
 
         function sendCommand(command) {
@@ -483,7 +1087,8 @@
                 return;
             }
 
-            simulateCommand(command);
+            processCommand(command);
+            redrawScreen();
             updateStatus(`Command executed: ${command.toUpperCase()}`);
         }
 
@@ -499,10 +1104,124 @@
             try {
                 updateStatus('Loading file: ' + file.name);
 
-                // Add file to simulated filesystem
-                fileSystem[file.name.toUpperCase()] = '[Binary File - ' + file.size + ' bytes]';
-                
-                updateStatus(`File loaded: ${file.name}. Use DIR command to see it listed.`);
+                if (file.name.toLowerCase().endsWith('.zip')) {
+                    // Handle ZIP files
+                    const zip = new JSZip();
+                    const contents = await zip.loadAsync(file);
+                    
+                    let filesExtracted = 0;
+                    let gameFiles = [];
+                    let dataFiles = [];
+                    
+                    // Extract all files from ZIP
+                    for (const [filename, zipEntry] of Object.entries(contents.files)) {
+                        if (!zipEntry.dir) {
+                            const fileData = await zipEntry.async('uint8array');
+                            const upperFilename = filename.toUpperCase();
+                            
+                            // Store file in simulated filesystem with better categorization
+                            if (upperFilename.endsWith('.EXE')) {
+                                fileSystem[upperFilename] = `[Executable - ${fileData.length} bytes]`;
+                                gameFiles.push(upperFilename);
+                            } else if (upperFilename.endsWith('.COM')) {
+                                fileSystem[upperFilename] = `[DOS Program - ${fileData.length} bytes]`;
+                                gameFiles.push(upperFilename);
+                            } else if (upperFilename.endsWith('.WAD') || upperFilename.endsWith('.PAK') || 
+                                      upperFilename.endsWith('.DAT') || upperFilename.endsWith('.RES')) {
+                                fileSystem[upperFilename] = `[Game Data - ${fileData.length} bytes]`;
+                                dataFiles.push(upperFilename);
+                            } else if (upperFilename.endsWith('.CFG') || upperFilename.endsWith('.INI') || 
+                                      upperFilename.endsWith('.TXT') || upperFilename.endsWith('.DOC')) {
+                                // Try to convert small text files
+                                try {
+                                    if (fileData.length < 5000) {
+                                        const text = new TextDecoder().decode(fileData);
+                                        fileSystem[upperFilename] = text;
+                                    } else {
+                                        fileSystem[upperFilename] = `[Text File - ${fileData.length} bytes]`;
+                                    }
+                                } catch (e) {
+                                    fileSystem[upperFilename] = `[Configuration - ${fileData.length} bytes]`;
+                                }
+                            } else if (upperFilename.endsWith('.BAT')) {
+                                try {
+                                    const batContent = new TextDecoder().decode(fileData);
+                                    fileSystem[upperFilename] = batContent;
+                                } catch (e) {
+                                    fileSystem[upperFilename] = `[Batch File - ${fileData.length} bytes]`;
+                                }
+                            } else {
+                                fileSystem[upperFilename] = `[Data File - ${fileData.length} bytes]`;
+                            }
+                            filesExtracted++;
+                        }
+                    }
+                    
+                    let statusMessage = `ZIP extracted: ${filesExtracted} files loaded.`;
+                    
+                    // Enhanced detection and messaging
+                    if (gameFiles.length > 0) {
+                        statusMessage += ` Found ${gameFiles.length} executable(s).`;
+                        
+                        setTimeout(() => {
+                            commandHistory.push('');
+                            commandHistory.push('=== ZIP FILE EXTRACTED SUCCESSFULLY ===');
+                            commandHistory.push(`Total files: ${filesExtracted}`);
+                            commandHistory.push(`Executables: ${gameFiles.length}`);
+                            commandHistory.push(`Data files: ${dataFiles.length}`);
+                            commandHistory.push('');
+                            
+                            if (gameFiles.length === 1) {
+                                const gameName = gameFiles[0].replace('.EXE', '').replace('.COM', '');
+                                commandHistory.push(`🎮 GAME DETECTED: ${gameName}`);
+                                commandHistory.push(`Type "${gameName.toLowerCase()}" to play!`);
+                                commandHistory.push(`Or type "autorun" to start automatically.`);
+                            } else {
+                                commandHistory.push('🎮 MULTIPLE GAMES/PROGRAMS FOUND:');
+                                gameFiles.forEach(game => {
+                                    const gameName = game.replace('.EXE', '').replace('.COM', '');
+                                    commandHistory.push(`  - Type "${gameName.toLowerCase()}" to run ${game}`);
+                                });
+                            }
+                            
+                            commandHistory.push('');
+                            commandHistory.push('Type "games" to see all available programs');
+                            commandHistory.push('Type "dir" to see all files');
+                            commandHistory.push('');
+                            redrawScreen();
+                        }, 1000);
+                    } else {
+                        statusMessage += ' No executables found.';
+                    }
+                    
+                    updateStatus(statusMessage);
+                    
+                } else {
+                    // Handle single EXE/COM files
+                    const arrayBuffer = await file.arrayBuffer();
+                    const upperFilename = file.name.toUpperCase();
+                    
+                    if (upperFilename.endsWith('.EXE') || upperFilename.endsWith('.COM')) {
+                        fileSystem[upperFilename] = `[Game Executable - ${arrayBuffer.byteLength} bytes]`;
+                        const gameName = upperFilename.replace('.EXE', '').replace('.COM', '');
+                        
+                        updateStatus(`Game loaded: ${file.name}. Type "${gameName.toLowerCase()}" to run it!`);
+                        
+                        // Show helpful message
+                        setTimeout(() => {
+                            commandHistory.push('');
+                            commandHistory.push('=== GAME FILE LOADED ===');
+                            commandHistory.push(`File: ${upperFilename}`);
+                            commandHistory.push(`🎮 Type "${gameName.toLowerCase()}" to play!`);
+                            commandHistory.push('Or use the "Run Game" button below');
+                            commandHistory.push('');
+                            redrawScreen();
+                        }, 500);
+                    } else {
+                        fileSystem[upperFilename] = `[Data File - ${arrayBuffer.byteLength} bytes]`;
+                        updateStatus(`File loaded: ${file.name}. Use DIR command to see it listed.`);
+                    }
+                }
                 
                 // Show updated directory
                 setTimeout(() => {
@@ -523,21 +1242,88 @@
         updateStatus('Ready to start DOSBox simulation. Click "Start DOSBox" to begin.');
 
         // Add keyboard input support
-        document.getElementById('dosbox-canvas').addEventListener('keydown', function(e) {
+        document.addEventListener('keydown', function(e) {
+            // Only handle input when DOSBox is running and canvas is focused
             if (!isRunning) return;
             
-            // Handle Enter key for command input
-            if (e.key === 'Enter') {
-                // For now, just show that input is received
-                updateStatus('Keyboard input received. Use the command buttons for demo functionality.');
+            const canvas = document.getElementById('dosbox-canvas');
+            if (document.activeElement !== canvas) return;
+            
+            // Special handling when game is waiting to start
+            if (gameRunning && window.tempProcessCommand) {
+                if (e.key === 'Enter') {
+                    window.tempProcessCommand('');
+                    e.preventDefault();
+                    return;
+                }
+            }
+            
+            switch(e.key) {
+                case 'Enter':
+                    if (currentInput.trim()) {
+                        processCommand(currentInput);
+                        currentInput = '';
+                        redrawScreen();
+                        updateStatus('Command executed. Type another command or use the buttons.');
+                    }
+                    break;
+                    
+                case 'Backspace':
+                    if (currentInput.length > 0) {
+                        currentInput = currentInput.slice(0, -1);
+                        redrawScreen();
+                    }
+                    break;
+                    
+                case 'Escape':
+                    // Exit game if running
+                    if (gameRunning) {
+                        endGameEarly();
+                    }
+                    break;
+                    
+                case 'Tab':
+                case 'ArrowUp':
+                case 'ArrowDown':
+                case 'ArrowLeft':
+                case 'ArrowRight':
+                    // Prevent default behavior for these keys
+                    break;
+                    
+                default:
+                    // Add regular characters to input (only if not in game mode)
+                    if (e.key.length === 1 && !gameRunning) {
+                        // Convert to uppercase for DOS-like behavior
+                        currentInput += e.key.toUpperCase();
+                        redrawScreen();
+                    }
+                    break;
             }
             
             e.preventDefault();
         });
 
-        // Handle canvas clicks to focus
+        function endGameEarly() {
+            gameRunning = false;
+            commandHistory = ['', '=== GAME INTERRUPTED ===', 'Returned to DOS prompt.', ''];
+            redrawScreen();
+            updateStatus('Game exited. Back to DOS prompt.');
+            
+            // Restore normal command processing
+            if (window.tempProcessCommand) {
+                window.processCommand = function(command) {
+                    processCommand(command);
+                };
+                delete window.tempProcessCommand;
+            }
+        }
+
+        // Handle canvas clicks to focus and show instructions
         document.getElementById('dosbox-canvas').addEventListener('click', function() {
             this.focus();
+            if (isRunning) {
+                updateStatus('Canvas focused. You can now type DOS commands directly!');
+            }
         });
 
         // Add some sample commands to try
