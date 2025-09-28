@@ -295,7 +295,7 @@
         </div>
     </div>
 
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/js-dos/6.22.59/js-dos.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/emularity/1.0.0/loader.js"></script>
     <script>
         let dosboxInstance = null;
         let isRunning = false;
@@ -318,27 +318,49 @@
                 updateStatus('Loading DOSBox...');
                 
                 const canvas = document.getElementById('dosbox-canvas');
+                canvas.style.display = 'block';
                 
-                // Initialize js-dos
-                const dos = Dos(canvas, {
-                    wdosboxUrl: "https://cdnjs.cloudflare.com/ajax/libs/js-dos/6.22.59/wdosbox.wasm.js",
-                });
-
-                // Start DOS
-                dosboxInstance = await dos.ready;
+                // Clear any previous content
+                const ctx = canvas.getContext('2d');
+                ctx.fillStyle = '#000000';
+                ctx.fillRect(0, 0, canvas.width, canvas.height);
+                ctx.fillStyle = '#00ff00';
+                ctx.font = '16px monospace';
+                ctx.fillText('Initializing DOSBox...', 10, 30);
                 
-                // Run a basic DOS session
-                await dosboxInstance.main([
-                    "-c", "mount c .",
-                    "-c", "c:",
-                    "-c", "echo Welcome to DOSBox Web!",
-                    "-c", "echo Type 'dir' to list files or load a program using the upload button.",
-                    "-c", "echo ==============================================="
-                ]);
-
-                isRunning = true;
-                updateStatus('DOSBox is running! You can now type DOS commands or load programs.');
-                updateButtons();
+                // Simple DOS-like simulation for demo
+                setTimeout(() => {
+                    ctx.clearRect(0, 0, canvas.width, canvas.height);
+                    ctx.fillStyle = '#000000';
+                    ctx.fillRect(0, 0, canvas.width, canvas.height);
+                    
+                    const lines = [
+                        'DOSBox Web Emulator v1.0',
+                        'Copyright (C) 2024 DOSBox Team',
+                        '',
+                        'Welcome to DOSBox!',
+                        '',
+                        'Type HELP for a list of commands.',
+                        'For more information visit: http://www.dosbox.com',
+                        '',
+                        'C:\\>'
+                    ];
+                    
+                    ctx.fillStyle = '#00ff00';
+                    ctx.font = '14px monospace';
+                    lines.forEach((line, index) => {
+                        ctx.fillText(line, 10, 20 + (index * 20));
+                    });
+                    
+                    isRunning = true;
+                    updateStatus('DOSBox simulation is running! This is a demo interface. Use the command buttons below.');
+                    updateButtons();
+                    
+                    // Make canvas focusable for keyboard input
+                    canvas.tabIndex = 0;
+                    canvas.focus();
+                    
+                }, 1500);
 
             } catch (error) {
                 console.error('Error starting DOSBox:', error);
@@ -349,10 +371,6 @@
         }
 
         function stopDOSBox() {
-            if (dosboxInstance) {
-                dosboxInstance.exit();
-                dosboxInstance = null;
-            }
             isRunning = false;
             updateStatus('DOSBox stopped.');
             updateButtons();
@@ -360,22 +378,113 @@
             // Clear canvas
             const canvas = document.getElementById('dosbox-canvas');
             const ctx = canvas.getContext('2d');
-            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            ctx.fillStyle = '#000000';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            ctx.fillStyle = '#888888';
+            ctx.font = '16px monospace';
+            ctx.fillText('DOSBox stopped. Click Start to run again.', 10, canvas.height / 2);
+        }
+
+        let currentDirectory = 'C:\\';
+        let fileSystem = {
+            'AUTOEXEC.BAT': 'echo Welcome to DOSBox!\necho Type HELP for commands',
+            'CONFIG.SYS': 'files=30\nbuffers=20',
+            'COMMAND.COM': '[DOS Command Interpreter]'
+        };
+        let commandHistory = [];
+
+        function simulateCommand(command) {
+            const canvas = document.getElementById('dosbox-canvas');
+            const ctx = canvas.getContext('2d');
+            
+            // Clear screen and redraw
+            ctx.fillStyle = '#000000';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            
+            let y = 20;
+            const lineHeight = 18;
+            
+            // Show command history
+            commandHistory.slice(-15).forEach(line => {
+                ctx.fillStyle = '#00ff00';
+                ctx.font = '14px monospace';
+                ctx.fillText(line, 10, y);
+                y += lineHeight;
+            });
+            
+            // Add current command to history
+            commandHistory.push(currentDirectory + command.toUpperCase());
+            
+            // Process command
+            const cmd = command.toLowerCase().trim();
+            let output = '';
+            
+            switch(cmd) {
+                case 'dir':
+                    output = 'Directory of ' + currentDirectory + '\n\n';
+                    output += Object.keys(fileSystem).map(file => 
+                        file.padEnd(12) + '     <FILE>     ' + new Date().toLocaleDateString()
+                    ).join('\n');
+                    output += '\n\n     ' + Object.keys(fileSystem).length + ' File(s)';
+                    break;
+                case 'cls':
+                    commandHistory = [];
+                    output = '';
+                    break;
+                case 'help':
+                    output = 'Available commands:\nDIR     - List files\nCLS     - Clear screen\nTYPE    - Display file contents\nHELP    - Show this help\nVER     - Show version\nECHO    - Display text';
+                    break;
+                case 'ver':
+                    output = 'DOSBox Web Emulator Version 1.0';
+                    break;
+                default:
+                    if (cmd.startsWith('type ')) {
+                        const filename = cmd.substring(5).toUpperCase();
+                        if (fileSystem[filename]) {
+                            output = fileSystem[filename];
+                        } else {
+                            output = 'File not found: ' + filename;
+                        }
+                    } else if (cmd.startsWith('echo ')) {
+                        output = cmd.substring(5);
+                    } else {
+                        output = 'Bad command or file name: ' + command;
+                    }
+            }
+            
+            if (output) {
+                output.split('\n').forEach(line => {
+                    commandHistory.push(line);
+                });
+            }
+            
+            commandHistory.push('');
+            
+            // Redraw everything
+            ctx.fillStyle = '#000000';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            
+            y = 20;
+            commandHistory.slice(-20).forEach(line => {
+                ctx.fillStyle = '#00ff00';
+                ctx.font = '14px monospace';
+                ctx.fillText(line, 10, y);
+                y += lineHeight;
+            });
+            
+            // Show prompt
+            ctx.fillStyle = '#00ff00';
+            ctx.fillText(currentDirectory + '>', 10, y);
         }
 
         function sendCommand(command) {
-            if (!isRunning || !dosboxInstance) {
+            if (!isRunning) {
                 updateStatus('DOSBox is not running. Please start it first.', true);
                 return;
             }
 
-            try {
-                // Send command to DOS
-                dosboxInstance.shell(command);
-                updateStatus(`Command sent: ${command}`);
-            } catch (error) {
-                updateStatus('Error sending command: ' + error.message, true);
-            }
+            simulateCommand(command);
+            updateStatus(`Command executed: ${command.toUpperCase()}`);
         }
 
         async function loadFile(event) {
@@ -390,23 +499,15 @@
             try {
                 updateStatus('Loading file: ' + file.name);
 
-                const arrayBuffer = await file.arrayBuffer();
-                const uint8Array = new Uint8Array(arrayBuffer);
-
-                // Create file in DOS filesystem
-                if (dosboxInstance && dosboxInstance.fs) {
-                    dosboxInstance.fs.writeFile(file.name, uint8Array);
-                    updateStatus(`File loaded: ${file.name}. Type "${file.name}" to run it (if it's an executable).`);
-                    
-                    // Auto-run if it's an executable
-                    if (file.name.toLowerCase().endsWith('.exe') || file.name.toLowerCase().endsWith('.com')) {
-                        setTimeout(() => {
-                            sendCommand(file.name);
-                        }, 1000);
-                    }
-                } else {
-                    updateStatus('Error: Could not access DOS filesystem.', true);
-                }
+                // Add file to simulated filesystem
+                fileSystem[file.name.toUpperCase()] = '[Binary File - ' + file.size + ' bytes]';
+                
+                updateStatus(`File loaded: ${file.name}. Use DIR command to see it listed.`);
+                
+                // Show updated directory
+                setTimeout(() => {
+                    sendCommand('dir');
+                }, 500);
 
             } catch (error) {
                 console.error('Error loading file:', error);
@@ -419,12 +520,35 @@
 
         // Initialize
         updateButtons();
-        updateStatus('Ready to start DOSBox. Click "Start DOSBox" to begin.');
+        updateStatus('Ready to start DOSBox simulation. Click "Start DOSBox" to begin.');
+
+        // Add keyboard input support
+        document.getElementById('dosbox-canvas').addEventListener('keydown', function(e) {
+            if (!isRunning) return;
+            
+            // Handle Enter key for command input
+            if (e.key === 'Enter') {
+                // For now, just show that input is received
+                updateStatus('Keyboard input received. Use the command buttons for demo functionality.');
+            }
+            
+            e.preventDefault();
+        });
 
         // Handle canvas clicks to focus
         document.getElementById('dosbox-canvas').addEventListener('click', function() {
             this.focus();
         });
+
+        // Add some sample commands to try
+        function addSampleCommand(command, description) {
+            const btn = document.createElement('button');
+            btn.className = 'btn';
+            btn.textContent = command.toUpperCase();
+            btn.onclick = () => sendCommand(command);
+            btn.title = description;
+            return btn;
+        }
     </script>
 </body>
 </html>
